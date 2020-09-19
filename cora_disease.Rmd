@@ -1,0 +1,510 @@
+---
+title: "Enfermo del Corazón"
+author: "Giovanny Lopez"
+date: "16/9/2020"
+output:
+  html_document: 
+    theme: flatly
+    highlight: tango
+    toc: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE,
+                      message = FALSE)
+```
+
+# Carga
+
+```{r Carga Paquetes}
+library(tidyverse)
+library(DataExplorer) # Graficar Faltantes
+library(GGally) #Para graficas de correlaciones
+library(randomForest)
+library(ggpubr) # Para comparar promedio de distribuciones
+# Usando la base de datos procesada de Cleveland
+library(rpart) # Para Crear el Árbol de Decisión
+library(rattle) # Para graficar el Árbol de Decisión
+library(caTools) # Para dividir los datos balanceados por Predictor
+library(caret) # Matriz de Confusión
+library(party) # Para Predicción Bosque Condicional Inferencial
+```
+
+```{r Carga de Datos}
+cora_disease <-
+    read_csv(url("https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"),
+             col_names = c("edad",
+                           "sexo",
+                           "dp", # Tipo de dolor de Pecho
+                           "ps", # Presión de Sangre en Descanso
+                           "colesterol", # Colesteról Sérico
+                           "glicemia", # Azúcar en Sangre en Ayunas
+                           "rer", # Resultados Electrocardiográficos en Reposo
+                           "max_lpm", # Frecuencia Cardiaca Durante Prueba de Esfuerzo
+                           "angina", # Anginas Inducidas por Ejercicio
+                           "depre_st", # Depresión ST Inducida por Ejercicio, descansando
+                           "pico_st", # Pendiente del Pico del Segmento ST en Ejercicio
+                           "vasos", # Vasos Principales
+                           "desorden", # Desorden de Sangre
+                           "diagnostico")) # 1 = Enfermo, 0 = no enfermo
+```
+
+# Limpieza
+
+```{r}
+vasos_nulos <- which(cora_disease$vasos == "?")
+cora_disease <- cora_disease[-vasos_nulos,]
+
+desorden_nulos <- which(cora_disease$desorden == "?")
+cora_disease <- cora_disease[-desorden_nulos,]
+```
+
+```{r}
+cora_disease$vasos[cora_disease$vasos == "0.0"] <- 0
+cora_disease$vasos[cora_disease$vasos == "0.1"] <- 1
+cora_disease$vasos[cora_disease$vasos == "0.2"] <- 2
+cora_disease$vasos[cora_disease$vasos == "0.3"] <- 3
+cora_disease$vasos <- as.numeric(cora_disease$vasos)
+
+cora_disease$desorden[cora_disease$desorden == "3.0"] <- 3
+cora_disease$desorden[cora_disease$desorden == "6.0"] <- 6
+cora_disease$desorden[cora_disease$desorden == "7.0"] <- 7
+cora_disease$desorden <- as.numeric(cora_disease$desorden)
+```
+
+
+```{r}
+cora_disease$diagnostico[cora_disease$diagnostico > 0] <- 1
+cora_disease %>% count(diagnostico)
+```
+
+```{r}
+plot_missing(cora_disease)
+```
+
+```{r}
+glimpse(cora_disease)
+```
+
+
+# Exploración
+
+Continuas
+
+```{r}
+cora_plot <- cora_disease
+cora_plot$sexo <- factor(cora_plot$sexo)
+levels(cora_plot$sexo)[levels(cora_plot$sexo) == 0] <- "Mujer"
+levels(cora_plot$sexo)[levels(cora_plot$sexo) == 1] <- "Hombre"
+cora_plot$diagnostico <- factor(cora_plot$diagnostico)
+levels(cora_plot$diagnostico)[levels(cora_plot$diagnostico) == 0] <- "Sano"
+levels(cora_plot$diagnostico)[levels(cora_plot$diagnostico) == 1] <- "Enfermo"
+```
+
+```{r}
+a1 <- ggplot(cora_plot, aes(x= diagnostico, y = edad, fill = sexo)) +
+  geom_violin(width = 0.7) +
+  geom_boxplot(width = 0.7, alpha = 0.6) +
+  ylim(20, 80) +
+  stat_compare_means(aes(label = ..p.signif..), method = "t.test") +
+  theme(legend.position='right') +
+  labs(x = "Diagnóstico", y = "Edad", fill = "Sexo")
+```
+
+```{r}
+a2 <- ggplot(cora_plot, aes(x= diagnostico, y = ps, fill = sexo)) +
+  geom_violin(width = 0.7) +
+  geom_boxplot(width = 0.7, alpha = 0.6) +
+  stat_compare_means(aes(label = ..p.signif..), method = "t.test") +
+  theme(legend.position='right') +
+  labs(x = "Diagnóstico", y = "Presión Sanguínea (mm/Hg)", fill = "Sexo")
+```
+
+```{r}
+a3 <- ggplot(cora_plot, aes(x= diagnostico, y = colesterol, fill = sexo)) +
+  geom_violin(width = 0.7) +
+  geom_boxplot(width = 0.7, alpha = 0.6) +
+  stat_compare_means(aes(label = ..p.signif..), method = "t.test") +
+  theme(legend.position='right') +
+  labs(x = "Diagnóstico", y = "Colesterol (mg/dl)", fill = "Sexo")
+```
+
+```{r}
+a4 <- ggplot(cora_plot, aes(x= diagnostico, y = depre_st, fill = sexo)) +
+  geom_violin(width = 0.7) +
+  geom_boxplot(width = 0.7, alpha = 0.6) +
+  ylim(-0.2, 6.3) +
+  stat_compare_means(aes(label = ..p.signif..), method = "t.test") +
+  theme(legend.position='right') +
+  labs(x = "Diagnóstico", y = "Depresión del ST", fill = "Sexo")
+```
+
+
+```{r}
+a5 <- ggplot(cora_plot, aes(x= diagnostico, y = max_lpm, fill = sexo)) +
+  geom_violin(width = 0.7) +
+  geom_boxplot(width = 0.7) +
+  stat_compare_means(aes(label = ..p.signif..), method = "t.test") +
+  theme(legend.position='right') +
+  labs(x = "Diagnóstico", y = "Máximo Ritmo Cardiaco", fill = "Sexo")
+```
+
+```{r}
+suppressWarnings(ggarrange(a1, a2, a3, a4, a5, 
+          ncol = 2, nrow = 3,
+            align = "v"))
+```
+
+
+Categóricas
+
+```{r}
+cora_plot$dp <- factor(cora_plot$dp)
+levels(cora_plot$dp)[levels(cora_plot$dp) == 1] <- "Angina Típica"
+levels(cora_plot$dp)[levels(cora_plot$dp) == 2] <- "Angina Atípica"
+levels(cora_plot$dp)[levels(cora_plot$dp) == 3] <- "Sin Dolor Angina"
+levels(cora_plot$dp)[levels(cora_plot$dp) == 4] <- "Asintomático"
+
+cora_plot$rer <- factor(cora_plot$rer)
+levels(cora_plot$rer)[levels(cora_plot$rer) == 0] <- "Normal"
+levels(cora_plot$rer)[levels(cora_plot$rer) == 1] <- "Anormal"
+levels(cora_plot$rer)[levels(cora_plot$rer) == 2] <- "Hipertropía"
+
+cora_plot$glicemia <- factor(cora_plot$glicemia)
+levels(cora_plot$glicemia)[levels(cora_plot$glicemia) == 0] <- "NO"
+levels(cora_plot$glicemia)[levels(cora_plot$glicemia) == 1] <- "SI"
+
+cora_plot$pico_st <- factor(cora_plot$pico_st)
+levels(cora_plot$pico_st)[levels(cora_plot$pico_st) == 1] <- "Subiendo"
+levels(cora_plot$pico_st)[levels(cora_plot$pico_st) == 2] <- "Plano"
+levels(cora_plot$pico_st)[levels(cora_plot$pico_st) == 3] <- "Bajando"
+
+cora_plot$desorden <- factor(cora_plot$desorden)
+levels(cora_plot$desorden)[levels(cora_plot$desorden) == 3] <- "Normal"
+levels(cora_plot$desorden)[levels(cora_plot$desorden) == 6] <- "Defecto Fijo"
+levels(cora_plot$desorden)[levels(cora_plot$desorden) == 7] <- "Defecto Reversible"
+
+cora_plot$angina <- factor(cora_plot$angina)
+levels(cora_plot$angina)[levels(cora_plot$angina) == 1] <- "SI"
+levels(cora_plot$angina)[levels(cora_plot$angina) == 0] <- "NO"
+```
+
+
+```{r}
+b1 <- ggplot(cora_plot, aes(dp, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Dolor de Pecho", y = NULL, fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+
+```{r}
+b2 <- ggplot(cora_plot, aes(rer, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Electrocardiograma", Y = NULL,
+       fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+```{r}
+b3 <- ggplot(cora_plot, aes(glicemia, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Glucemia", Y = NULL, fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+```{r}
+b4 <- ggplot(cora_plot, aes(pico_st, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Pendiente ST", Y = NULL, fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+```{r}
+b5 <- ggplot(cora_plot, aes(desorden, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Talasemia", Y = NULL, fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+```{r}
+b6 <- ggplot(cora_plot, aes(vasos, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Vasos Importantes", Y = NULL, fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+```{r}
+b7 <- ggplot(cora_plot, aes(angina, group = diagnostico, fill = diagnostico)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Angina por Ejercicio", Y = NULL,
+       fill = "Diagnóstico") +
+  coord_flip() +
+  theme(legend.position='right')
+```
+
+```{r}
+suppressWarnings(ggarrange(b1, b2, b3, b4, b5, b6, b7,
+                           ncol = 2, nrow = 4, align = "v"))
+```
+
+**Relación Visual:**  
+|Continuas|Discretas|  
+|Sexo|Dolor de Pecho|  
+|Edad|Electrocardiograma|
+|Presión Sanguínea|Talasemia|
+|Máximo Ritmo Cardiaco|Vasos Principales|
+|Depresión del ST|Angina|
+
+```{r Correlación}
+ggcorr(cora_disease, geom = "blank", label = TRUE,
+       label_size = 3, hjust = 0.9, layout.exp = 2) +
+  geom_point(size = 8, aes(color = coefficient > 0, 
+                           alpha = abs(coefficient) > 0.35)) +
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) +
+  guides(color = FALSE, alpha = FALSE)
+```
+
+**Baja correlación:**
+|Electrocardiograma|Glucemia|
+|Colesterol|Presión Sanguínea|
+|Edad|Sexo|
+|Pico de Pendiente del ST||
+
+**Variables elegidas para predicción:**  
+|Dolor de Pecho|Ritmo Cardiaco Máximo|Angina|Sexo|Electrocardiograma|  
+|Pendiente ST|Vasos Principales|Talasemia|Depresión del ST|Edad|  
+```{r}
+cora_elegidos <- cora_disease %>% 
+  select(-glicemia, - colesterol, -pico_st)
+```
+
+```{r fig.height = 10, fig.width = 12, fig.align = "center"}
+ggpairs(cora_elegidos)
+```
+
+
+# Modelación  
+
+## Árbol de Decisión  
+
+```{r}
+cora_elegidos$diagnostico <- factor(cora_elegidos$diagnostico) # Define diagnostico as a factor. rpart classification would not work otherwise.
+
+exactitud <- 0
+set.seed(2021)
+# Build a simple classification desicion tree with rpart. Run the model until the accuracy reach the selected minimum.
+antes <- Sys.time()
+while(exactitud <= 0.88) {
+  split_values <- sample.split(cora_elegidos$diagnostico, SplitRatio = 0.65)
+  train_set <- subset(cora_elegidos, split_values == T)
+  test_set <- subset(cora_elegidos, split_values == F)
+  mod_class <- rpart(diagnostico~. , data=train_set)
+  result_class <- predict(mod_class, test_set, type = "class")
+  table <- table(test_set$diagnostico, result_class)
+  exactitud <- (table["0","0"] + table["1","1"])/sum(table)
+}
+despues <- Sys.time()
+paste("El bucle tardó", round(despues-antes,2), "segundos en encontrar un árbol de decisión con una exactitud de", round(exactitud, digits = 4)*100, "%")
+```
+
+```{r}
+fancyRpartPlot(mod_class, caption = NULL)
+```
+
+
+## Bosque Aleatorio  
+
+```{r}
+set.seed(103)
+train <- sample(nrow(cora_elegidos), 0.8*nrow(cora_elegidos), replace = FALSE)
+TrainSet <- cora_elegidos[train,]
+ValidSet <- cora_elegidos[-train,]
+```
+
+```{r}
+set.seed(1234)
+bosque <- randomForest(diagnostico ~ ., data = TrainSet,
+                       ntree = 1000, mtry = 2, importance = TRUE)
+bosque
+```
+
+```{r}
+# Predicción para el conjunto de Entrenamiento
+predTrain <- predict(bosque, TrainSet, type = "class")
+# Precisión de la Clasificación
+table(predTrain, TrainSet$diagnostico) 
+```
+
+## Regresión Logística
+
+```{r}
+set.seed(144)
+spl = sample.split(cora_elegidos$diagnostico, 0.8)
+train1 = subset(cora_elegidos, spl == TRUE)
+test1=subset(cora_elegidos,spl==FALSE)
+```
+
+
+```{r}
+logistica = glm(diagnostico ~., data = train1, family = "binomial")
+summary(logistica)
+```
+
+
+## Árboles de Condiciones Inferenciales
+
+```{r}
+set.seed(144)
+bcondicional <- cforest(diagnostico ~ ., data = train1, 
+                        controls = cforest_unbiased(ntree = 2000, mtry = 3))
+```
+
+
+
+# Evaluación
+## Bosques Aleatorios Validación
+
+```{r}
+# Predicción para el conjunto de Validación
+predValid <- predict(bosque, ValidSet, type = "class")
+# Exactitud de la Clasificación
+mean(predValid == ValidSet$diagnostico)
+```
+
+```{r}
+varImpPlot(bosque)  
+```
+
+```{r}
+matriz1 <- confusionMatrix(predValid, ValidSet$diagnostico,
+                positive = "1",
+                dnn=c("prediciones","real"),
+                mode="prec_recall")
+```
+
+## Regresión Logística Validación
+
+```{r}
+prediccion = predict(logistica, newdata=test1, type="response")
+table(test1$diagnostico, prediccion > 0.5)
+```
+
+```{r}
+matriz2 <- confusionMatrix(factor(as.numeric(prediccion > 0.5)), test1$diagnostico,
+                positive = "1",
+                dnn=c("prediciones","real"),
+                mode="prec_recall")
+```
+
+
+```{r}
+paste('La predicción máxima en Regresión Logística tiene un valor de',round(max(prediccion),4)*100,'%')
+```
+
+## Bosques Aleatorios Condicionales Validación
+
+```{r}
+Prediccion2 <- predict(bcondicional, newdata=test1, type = "response")
+```
+
+```{r}
+matriz3 <- confusionMatrix(Prediccion2, test1$diagnostico,
+                positive = "1",
+                dnn=c("prediciones","real"),
+                mode="prec_recall")
+```
+
+```{r}
+exactitud_bosque <- matriz1$overall[[1]]
+exactitud_logistica <- matriz2$overall[[1]]
+exactitud_condicional <- matriz3$overall[[1]]
+```
+
+
+```{r Precisión}
+precision_bosque <- matriz1$table[2,2]/(matriz1$table[2,1]+matriz1$table[2,2])
+precision_logistica <- matriz2$table[2,2]/(matriz2$table[2,1]+matriz2$table[2,2])
+precision_condicional <- matriz3$table[2,2]/(matriz3$table[2,1]+matriz3$table[2,2])
+```
+
+```{r Recall}
+alcance_bosque <- matriz1$table[2,2]/(matriz1$table[1,2]+matriz1$table[2,2])
+alcance_logistica <- matriz2$table[2,2]/(matriz2$table[1,2]+matriz2$table[2,2])
+alcance_condicional <- matriz3$table[2,2]/(matriz3$table[1,2]+matriz3$table[2,2])
+```
+
+```{r F1_score}
+F1_score_bosque <- 2*(precision_bosque*alcance_bosque/(precision_bosque+alcance_bosque))
+F1_score_logistica <- 2*(precision_logistica*alcance_logistica/(precision_logistica+alcance_logistica))
+F1_score_condicional <- 2*(precision_condicional*alcance_condicional/(precision_condicional+alcance_condicional))
+```
+
+
+```{r}
+metricas <- tibble(Modelo = c("Bosques Aleatorios",
+                         "Logística",
+                         "Bosque Aleatorio Condicional"),
+                   Exactitud = c(exactitud_bosque,
+                                 exactitud_logistica,
+                                 exactitud_condicional),
+                   Precision = c(precision_bosque,
+                                 precision_logistica,
+                                 precision_condicional),
+                   Alcance = c(alcance_bosque,
+                               alcance_logistica,alcance_condicional),
+                   F1_score = c(F1_score_bosque,
+                                F1_score_logistica,
+                                F1_score_condicional))
+metricas
+```
+
+
+
+# Prueba
+## Bosque Aleatorio Prueba
+Prueba con datos inventados pero con tendencias coherentes a ser propensos a su clasificación de diagnóstico creado.
+```{r}
+prueba <- data.frame(edad = c(23, 25), sexo = c(1,0), dp = c(3,3),
+                       ps = c(115,121), colesterol = c(150,190),
+                       glicemia = c(0,1), rer = c(0,1),
+                       max_lpm = c(96,120), angina = c(0,1),
+                       depre_st = c(0.5, 1.8), pico_st = c(1,2),
+                       vasos = c(1,3), desorden = c(3,6),
+                       diagnostico = factor(c(0, 1)))
+```
+
+```{r}
+predtest <- predict(bosque, prueba, type = "class")
+# Exactitud de la Clasificación
+mean(predtest == prueba$diagnostico)
+```
+
+```{r}
+table(predtest,prueba$diagnostico)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
